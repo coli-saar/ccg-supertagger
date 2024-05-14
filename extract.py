@@ -1,4 +1,7 @@
 
+# python extract.py ../ccgbank_1_1/data/AUTO/00/wsj_0001.auto 
+
+
 import re
 import json
 
@@ -13,10 +16,12 @@ with open("../ccgbank_1_1/data/AUTO/00/wsj_0001.auto", "r") as f:
 
             matches = re.finditer(regex, line, re.MULTILINE)
             for match in matches:
-                supertags_here.append({"word": match.group(4), "supertags": [{"tag": match.group(1), "score": 1}]})
+                supertag = match.group(1)
+
+                if not (supertag.startswith(".") or supertag.startswith(",")):
+                    supertags_here.append({"word": match.group(4), "supertags": [{"tag": match.group(1), "score": 1}]})
                 # print(f"{match.group(1)}\t{match.group(4)}")
 
 with open("supertags.json", "w") as out:
     json.dump(supertags, out)
-
 
