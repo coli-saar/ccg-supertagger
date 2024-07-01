@@ -2,12 +2,11 @@
 import re
 import sys
 from dataclasses import dataclass, field
+from typing import Dict, List, Iterable
 
 # from attr import dataclass, field
 
 regex = r"<L\s*(\S+)\s*\S+\s*\S+\s+(\S+)[^>]*>"
-x = 0
-
 
 @dataclass
 class Sentence:
@@ -25,8 +24,14 @@ class Sentence:
 class Corpus:
     sentences: list[Sentence] = field(default_factory=list)
 
+    def as_dict(self) -> dict[str, list[list[str]]]:
+        return {
+            "words": [sent.words for sent in self.sentences],
+            "supertags": [sent.supertags for sent in self.sentences]
+        }
 
-def read_corpus(corpus_files:list[str]) -> Corpus:
+
+def read_corpus(corpus_files:Iterable[str]) -> Corpus:
     """
     Call me on a list of filenames in ccgbank*/data/AUTO.
 
@@ -51,8 +56,8 @@ def read_corpus(corpus_files:list[str]) -> Corpus:
     return ret
 
 
-
-corpus = read_corpus(sys.argv[1:])
-print(f"Read {len(corpus.sentences)} sentences.")
-print(corpus.sentences[0])
+if __name__ == "__main__":
+    corpus = read_corpus(sys.argv[1:])
+    print(f"Read {len(corpus.sentences)} sentences.")
+    print(corpus.sentences[0])
 
