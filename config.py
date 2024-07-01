@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class Config(BaseModel):
     # debug: bool = False
-    # batchsize: int
+    batchsize: int
     # ignore_index: int = -100
     # epochs: int
     # learning_rate: float
@@ -17,6 +17,7 @@ class Config(BaseModel):
     # limit_train: int = 1000000000
     # limit_dev: int = 1000000000
     training_data: str
+    supertag_vocabulary_filename: str = "supertag_vocabulary.txt"
 
     def get_training_filenames(self) -> Iterable[str]:
         names = list(glob(self.training_data))
