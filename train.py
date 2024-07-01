@@ -47,13 +47,6 @@ def prettyprint(words, tags, tokenized_inputs:BatchEncoding) -> None:
 
         print("---")
 
-
-        #
-        # print(len(words[sentence_ix]))
-        # print(len(tags[sentence_ix]))
-        # print(len(tokens[sentence_ix]))
-    sys.exit(0)
-
 def tokenize_and_align_labels(examples, label_all_tokens=False, skip_index=IGNORE_INDEX):
     # adapted from https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/token_classification.ipynb#scrollTo=vc0BSBLIIrJQ
 
@@ -108,10 +101,6 @@ train_dataloader = torch.utils.data.DataLoader(tokenized_datasets, batch_size=co
 for batch in train_dataloader:
     print(batch)
     sys.exit(0)
-
-
-# for i in range(10):
-#     print(ds[i])
 
 
 
