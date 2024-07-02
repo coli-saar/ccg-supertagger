@@ -1,0 +1,15 @@
+
+batchsize: 8
+learning_rate: 0.003
+epochs: 20
+
+training_data:
+  - '../ccgbank_1_1/data/AUTO/0[2-9]/*.auto'
+  - '../ccgbank_1_1/data/AUTO/1*/*.auto'
+  - '../ccgbank_1_1/data/AUTO/2[0-1]/*.auto'
+
+dev_data:
+  - '../ccgbank_1_1/data/AUTO/22/*.auto'
+
+test_data:
+  - '../ccgbank_1_1/data/AUTO/23/*.auto'
