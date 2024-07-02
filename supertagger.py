@@ -23,6 +23,7 @@ parser.add_argument('filenames', nargs="+")
 parser.add_argument('--output', '-O', required=True, help="Filename of the JSON file in which the supertag scores will be stored.")
 parser.add_argument('--num-supertags', '-n', type=int, default=5, help="Number of supertags that will be predicted for each word.")
 parser.add_argument("--config", "-c", type=str, default="config.yml", help="Name of the configuration file.")
+parser.add_argument("--model", "-m", type=str, default=None, help="Name of Pytorch model file. If no option is specified, use model name from the config file.")
 args = parser.parse_args()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -31,6 +32,13 @@ K = args.num_supertags
 config = Config.load(args.config)
 IGNORE_INDEX=-100
 device = device_selector.choose_device()
+
+# model filename
+if args.model:
+    model_filename = args.model
+else:
+    model_filename = config.model_filename
+
 
 # read test corpus
 data_dict = read_corpus(args.filenames).as_dict()
@@ -43,9 +51,11 @@ tokenized_dataset = dataset.map(tokenize_and_align_labels(tokenizer, supertag_vo
 
 
 # load the model
+print(f"Reading model parameters from {model_filename} ...")
 model = TaggingModel(len(supertag_vocab), roberta_id="xlm-roberta-base").to(device)
-model.load_state_dict(torch.load(config.model_filename))
+model.load_state_dict(torch.load(model_filename, map_location=device))
 model.eval()
+print("Done.")
 
 # set up dataloader
 tokenized_dataset.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask', 'tokens_representing_words'])

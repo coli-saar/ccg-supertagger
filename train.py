@@ -1,3 +1,5 @@
+import sys
+
 import torch
 from tqdm import tqdm
 
@@ -43,80 +45,79 @@ model = TaggingModel(len(supertag_vocab), roberta_id="xlm-roberta-base").to(devi
 loss = CrossEntropyLoss(ignore_index=IGNORE_INDEX, reduction='mean')
 optimizer = Adam(model.parameters(), lr=config.learning_rate)
 
-wandb.init(project="ccg-supertagging",
+with wandb.init(project="ccg-supertagging",
            config={"learning_rate": config.learning_rate,
                    "batch_size": config.batchsize,
                    "epochs": config.epochs,
                    "optimizer": "Adam",
-                   }
-)
+                   }) as run:
 
+    for epoch in range(config.epochs):
+        total_epoch_loss = 0.0
+        num_train_instances = 0
+        num_dev_instances = 0
+        model.train()
 
-for epoch in range(config.epochs):
-    total_epoch_loss = 0.0
-    num_train_instances = 0
-    num_dev_instances = 0
-    model.train()
-
-    for batch in tqdm(train_dataloader, desc="Training"):
-        input_batch = batch["input_ids"].to(device)
-        attention_mask_batch = batch["attention_mask"].to(device)
-        batchsize = input_batch.shape[0]
-
-        logits = model(input_batch, attention_mask_batch) # (bs, seqlen, #tags)
-
-        logits_nbyc = logits.view(-1, len(supertag_vocab)) # (bs * seqlen, #tags)
-        labels_nbyc = batch["supertag_ids"].to(device).view(-1) # (bs * seqlen,)
-        batch_loss = loss(logits_nbyc, labels_nbyc)
-
-        wandb.log({"batch_loss": batch_loss})
-
-        optimizer.zero_grad()
-        batch_loss.backward()
-        optimizer.step()
-
-        # end epoch after requested number of training instances, if specified
-        num_train_instances += batchsize
-        if num_train_instances >= config.limit_train:
-            break
-
-    # one iteration over data is finished, let's evaluate
-    print(f"Epoch {epoch} done, evaluating ...")
-    model.eval()
-    with torch.no_grad():
-        total_correct = 0
-        total_counted = 0
-        total_tokens = 0
-
-        for batch in dev_dataloader:
+        for batch in tqdm(train_dataloader, desc="Training"):
             input_batch = batch["input_ids"].to(device)
             attention_mask_batch = batch["attention_mask"].to(device)
             batchsize = input_batch.shape[0]
-            logits = model(input_batch, attention_mask_batch)  # (bs, seqlen, #tags)
 
-            predicted = torch.argmax(logits, dim=2).view(-1)  # (bs * seqlen)
-            gold = batch["supertag_ids"].to(device).view(-1)  # (bs * seqlen)
-            correct, counted = accuracy(predicted, gold, ignore_index=IGNORE_INDEX)
+            logits = model(input_batch, attention_mask_batch) # (bs, seqlen, #tags)
 
-            total_correct += int(correct)
-            total_counted += int(counted)
-            total_tokens += int(predicted.shape[0])
+            logits_nbyc = logits.view(-1, len(supertag_vocab)) # (bs * seqlen, #tags)
+            labels_nbyc = batch["supertag_ids"].to(device).view(-1) # (bs * seqlen,)
+            batch_loss = loss(logits_nbyc, labels_nbyc)
+
+            wandb.log({"batch_loss": batch_loss})
+
+            optimizer.zero_grad()
+            batch_loss.backward()
+            optimizer.step()
 
             # end epoch after requested number of training instances, if specified
-            num_dev_instances += batchsize
-            if num_dev_instances >= config.limit_dev:
+            num_train_instances += batchsize
+            if num_train_instances >= config.limit_train:
                 break
 
-        acc = float(total_correct) / total_counted
-        print(f"Eval: Counted {total_counted}/{total_tokens} tokens, {total_correct} correct (accuracy={acc}).")
-        wandb.log({"dev accuracy": acc})
+        # one iteration over data is finished, let's evaluate
+        print(f"Epoch {epoch} done, evaluating ...")
+        model.eval()
+        with torch.no_grad():
+            total_correct = 0
+            total_counted = 0
+            total_tokens = 0
 
-if config.model_filename:
-    print(f"Saving model parameters to {config.model_filename} ...")
-    torch.save(model.state_dict(), config.model_filename)
-    print("Done.")
+            for batch in dev_dataloader:
+                input_batch = batch["input_ids"].to(device)
+                attention_mask_batch = batch["attention_mask"].to(device)
+                batchsize = input_batch.shape[0]
+                logits = model(input_batch, attention_mask_batch)  # (bs, seqlen, #tags)
 
-wandb.finish()
+                predicted = torch.argmax(logits, dim=2).view(-1)  # (bs * seqlen)
+                gold = batch["supertag_ids"].to(device).view(-1)  # (bs * seqlen)
+                correct, counted = accuracy(predicted, gold, ignore_index=IGNORE_INDEX)
+
+                total_correct += int(correct)
+                total_counted += int(counted)
+                total_tokens += int(predicted.shape[0])
+
+                # end epoch after requested number of training instances, if specified
+                num_dev_instances += batchsize
+                if num_dev_instances >= config.limit_dev:
+                    break
+
+            acc = float(total_correct) / total_counted
+            print(f"Eval: Counted {total_counted}/{total_tokens} tokens, {total_correct} correct (accuracy={acc}).")
+            wandb.log({"dev accuracy": acc})
+
+    if config.model_filename:
+        filename = config.model_filename.replace("{RUN}", run.name)
+        print(f"Saving model parameters to {filename} ...")
+        torch.save(model.state_dict(), filename)
+        print("Done.")
+
+# wandb.finish()
 
 
 
