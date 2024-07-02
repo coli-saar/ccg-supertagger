@@ -1,10 +1,8 @@
-
-import sys
 import torch
 from tqdm import tqdm
 
 import wandb
-from datasets import Dataset, DatasetDict
+from datasets import DatasetDict
 from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
 from transformers import XLMRobertaTokenizerFast
@@ -12,8 +10,7 @@ from transformers import XLMRobertaTokenizerFast
 import device_selector
 from config import Config
 from model import TaggingModel
-from supertag_reader import read_corpus
-from util import Vocabulary, create_dataset, accuracy
+from util import Vocabulary, create_dataset, accuracy, tokenize_and_align_labels
 
 # suppress tokenizer parallelization
 import os
@@ -26,48 +23,9 @@ device = device_selector.choose_device()
 dataset = create_dataset(config)
 supertag_vocab = Vocabulary.load_or_initialize(config.supertag_vocabulary_filename)
 
-
-def tokenize_and_align_labels(examples, label_all_tokens=False, skip_index=IGNORE_INDEX):
-    # adapted from https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/token_classification.ipynb#scrollTo=vc0BSBLIIrJQ
-
-    tokenized_inputs = tokenizer(examples["words"], truncation=True, is_split_into_words=True, padding=True) # get "tokenizer" from global variable
-    # examples["token_ids"] = tokenized_inputs.input_ids # [sentence_ix][pos] = numeric token ID
-    # print(examples)
-
-    # see end of file for an example of what these look like at this point
-    # prettyprint(examples["words"], examples["supertags"], tokenized_inputs)
-
-    supertag_ids_whole_batch = []
-    for batch_ix, supertags_this_sentence in enumerate(examples["supertags"]):
-        word_ids = tokenized_inputs.word_ids(batch_index=batch_ix)
-        previous_word_idx = None
-        supertag_ids : list[int] = []
-        for word_idx in word_ids:
-            # Special tokens have a word id that is None. We set the label to -100 so they are automatically
-            # ignored in the loss function.
-            if word_idx is None:
-                supertag_ids.append(skip_index)
-
-            # We set the label for the first token of each word.
-            elif word_idx != previous_word_idx:
-                supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]))
-
-            # For the other tokens in a word, we set the label to either the current label or -100, depending on
-            # the label_all_tokens flag.
-            else:
-                supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]) if label_all_tokens else skip_index)
-
-            previous_word_idx = word_idx
-
-        supertag_ids_whole_batch.append(supertag_ids)
-
-    tokenized_inputs["supertag_ids"] = supertag_ids_whole_batch
-    return tokenized_inputs
-
-
 # tokenize and vocabularize the dataset
 tokenizer = XLMRobertaTokenizerFast.from_pretrained("xlm-roberta-base", add_prefix_space=True)
-tokenized_datasets: DatasetDict = dataset.map(tokenize_and_align_labels, batched=True, batch_size=config.batchsize) # this is super cool
+tokenized_datasets: DatasetDict = dataset.map(tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX), batched=True, batch_size=config.batchsize) # this is super cool
 supertag_vocab.save_if_fresh()
 
 # create batched Pytorch datasets
@@ -96,11 +54,14 @@ wandb.init(project="ccg-supertagging",
 
 for epoch in range(config.epochs):
     total_epoch_loss = 0.0
+    num_train_instances = 0
+    num_dev_instances = 0
     model.train()
 
     for batch in tqdm(train_dataloader, desc="Training"):
         input_batch = batch["input_ids"].to(device)
         attention_mask_batch = batch["attention_mask"].to(device)
+        batchsize = input_batch.shape[0]
 
         logits = model(input_batch, attention_mask_batch) # (bs, seqlen, #tags)
 
@@ -114,6 +75,11 @@ for epoch in range(config.epochs):
         batch_loss.backward()
         optimizer.step()
 
+        # end epoch after requested number of training instances, if specified
+        num_train_instances += batchsize
+        if num_train_instances >= config.limit_train:
+            break
+
     # one iteration over data is finished, let's evaluate
     print(f"Epoch {epoch} done, evaluating ...")
     model.eval()
@@ -125,6 +91,7 @@ for epoch in range(config.epochs):
         for batch in dev_dataloader:
             input_batch = batch["input_ids"].to(device)
             attention_mask_batch = batch["attention_mask"].to(device)
+            batchsize = input_batch.shape[0]
             logits = model(input_batch, attention_mask_batch)  # (bs, seqlen, #tags)
 
             predicted = torch.argmax(logits, dim=2).view(-1)  # (bs * seqlen)
@@ -135,11 +102,22 @@ for epoch in range(config.epochs):
             total_counted += int(counted)
             total_tokens += int(predicted.shape[0])
 
+            # end epoch after requested number of training instances, if specified
+            num_dev_instances += batchsize
+            if num_dev_instances >= config.limit_dev:
+                break
+
         acc = float(total_correct) / total_counted
         print(f"Eval: Counted {total_counted}/{total_tokens} tokens, {total_correct} correct (accuracy={acc}).")
         wandb.log({"dev accuracy": acc})
 
+if config.model_filename:
+    print(f"Saving model parameters to {config.model_filename} ...")
+    torch.save(model.state_dict(), config.model_filename)
+    print("Done.")
+
 wandb.finish()
+
 
 
 #

@@ -116,12 +116,6 @@ def accuracy(predicted, gold, ignore_index) -> (int, int):
     return int(correct), int(counted)
 
 def create_dataset(config:Config) -> DatasetDict:
-    # print(config.expand_filenames(config.training_data))
-    # print(config.expand_filenames(config.dev_data))
-    # print(config.expand_filenames(config.test_data))
-    # sys.exit(0)
-
-
     data_dict = {
         "train": read_corpus(config.expand_filenames(config.training_data)).as_dict(),
         "dev": read_corpus(config.expand_filenames(config.dev_data)).as_dict(),
@@ -132,3 +126,44 @@ def create_dataset(config:Config) -> DatasetDict:
     ds_dev = Dataset.from_dict(data_dict["dev"], split=NamedSplit("dev"))
 
     return DatasetDict({"train": ds_train, "dev": ds_dev})
+
+
+def tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX):
+    def mapfn(examples, label_all_tokens=False, skip_index=IGNORE_INDEX):
+        # adapted from https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/token_classification.ipynb#scrollTo=vc0BSBLIIrJQ
+
+        tokenized_inputs = tokenizer(examples["words"], truncation=True, is_split_into_words=True, padding=True) # get "tokenizer" from global variable
+        # examples["token_ids"] = tokenized_inputs.input_ids # [sentence_ix][pos] = numeric token ID
+        # print(examples)
+
+        # see end of file for an example of what these look like at this point
+        # prettyprint(examples["words"], examples["supertags"], tokenized_inputs)
+
+        supertag_ids_whole_batch = []
+        for batch_ix, supertags_this_sentence in enumerate(examples["supertags"]):
+            word_ids = tokenized_inputs.word_ids(batch_index=batch_ix)
+            previous_word_idx = None
+            supertag_ids : list[int] = []
+            for word_idx in word_ids:
+                # Special tokens have a word id that is None. We set the label to -100 so they are automatically
+                # ignored in the loss function.
+                if word_idx is None:
+                    supertag_ids.append(skip_index)
+
+                # We set the label for the first token of each word.
+                elif word_idx != previous_word_idx:
+                    supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]))
+
+                # For the other tokens in a word, we set the label to either the current label or -100, depending on
+                # the label_all_tokens flag.
+                else:
+                    supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]) if label_all_tokens else skip_index)
+
+                previous_word_idx = word_idx
+
+            supertag_ids_whole_batch.append(supertag_ids)
+
+        tokenized_inputs["supertag_ids"] = supertag_ids_whole_batch
+        return tokenized_inputs
+
+    return mapfn
