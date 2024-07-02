@@ -128,8 +128,8 @@ for epoch in range(config.epochs):
             logits = model(input_batch, attention_mask_batch)  # (bs, seqlen, #tags)
 
             predicted = torch.argmax(logits, dim=2).view(-1)  # (bs * seqlen)
-            gold = batch["labels"].to(device).view(-1)  # (bs * seqlen)
-            correct, counted = accuracy(predicted, gold)
+            gold = batch["supertag_ids"].to(device).view(-1)  # (bs * seqlen)
+            correct, counted = accuracy(predicted, gold, ignore_index=IGNORE_INDEX)
 
             total_correct += int(correct)
             total_counted += int(counted)
