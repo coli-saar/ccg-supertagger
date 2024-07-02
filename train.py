@@ -1,6 +1,8 @@
 
 import sys
 import torch
+from tqdm import tqdm
+
 import wandb
 from datasets import Dataset, DatasetDict
 from torch.nn import CrossEntropyLoss
@@ -11,7 +13,7 @@ import device_selector
 from config import Config
 from model import TaggingModel
 from supertag_reader import read_corpus
-from util import Vocabulary, create_dataset
+from util import Vocabulary, create_dataset, accuracy
 
 # suppress tokenizer parallelization
 import os
@@ -62,8 +64,6 @@ def tokenize_and_align_labels(examples, label_all_tokens=False, skip_index=IGNOR
     tokenized_inputs["supertag_ids"] = supertag_ids_whole_batch
     return tokenized_inputs
 
-# print(dataset["train"])
-
 
 # tokenize and vocabularize the dataset
 tokenizer = XLMRobertaTokenizerFast.from_pretrained("xlm-roberta-base", add_prefix_space=True)
@@ -85,13 +85,11 @@ model = TaggingModel(len(supertag_vocab), roberta_id="xlm-roberta-base").to(devi
 loss = CrossEntropyLoss(ignore_index=IGNORE_INDEX, reduction='mean')
 optimizer = Adam(model.parameters(), lr=config.learning_rate)
 
-wandb.init(project="roberta-tagging",
+wandb.init(project="ccg-supertagging",
            config={"learning_rate": config.learning_rate,
                    "batch_size": config.batchsize,
                    "epochs": config.epochs,
                    "optimizer": "Adam",
-                   # "architecture": "xlm-roberta+linear",
-                   # "dataset": UD_DATASET
                    }
 )
 
@@ -100,7 +98,7 @@ for epoch in range(config.epochs):
     total_epoch_loss = 0.0
     model.train()
 
-    for batch in train_dataloader:
+    for batch in tqdm(train_dataloader, desc="Training"):
         input_batch = batch["input_ids"].to(device)
         attention_mask_batch = batch["attention_mask"].to(device)
 
@@ -115,6 +113,31 @@ for epoch in range(config.epochs):
         optimizer.zero_grad()
         batch_loss.backward()
         optimizer.step()
+
+    # one iteration over data is finished, let's evaluate
+    print(f"Epoch {epoch} done, evaluating ...")
+    model.eval()
+    with torch.no_grad():
+        total_correct = 0
+        total_counted = 0
+        total_tokens = 0
+
+        for batch in dev_dataloader:
+            input_batch = batch["input_ids"].to(device)
+            attention_mask_batch = batch["attention_mask"].to(device)
+            logits = model(input_batch, attention_mask_batch)  # (bs, seqlen, #tags)
+
+            predicted = torch.argmax(logits, dim=2).view(-1)  # (bs * seqlen)
+            gold = batch["labels"].to(device).view(-1)  # (bs * seqlen)
+            correct, counted = accuracy(predicted, gold)
+
+            total_correct += int(correct)
+            total_counted += int(counted)
+            total_tokens += int(predicted.shape[0])
+
+        acc = float(total_correct) / total_counted
+        print(f"Eval: Counted {total_counted}/{total_tokens} tokens, {total_correct} correct (accuracy={acc}).")
+        wandb.log({"dev accuracy": acc})
 
 wandb.finish()
 
