@@ -1,13 +1,21 @@
 
 import sys
 import torch
+import wandb
 from datasets import Dataset
+from torch.nn import CrossEntropyLoss
+from torch.optim import Adam
 from transformers import XLMRobertaTokenizerFast
 
 import device_selector
 from config import Config
+from model import TaggingModel
 from supertag_reader import read_corpus
 from util import Vocabulary
+
+# suppress tokenizer parallelization
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 config = Config.load("config.yml")
 IGNORE_INDEX=-100
@@ -58,20 +66,52 @@ def tokenize_and_align_labels(examples, label_all_tokens=False, skip_index=IGNOR
     return tokenized_inputs
 
 
-
+# tokenize and vocabularize the dataset
 tokenizer = XLMRobertaTokenizerFast.from_pretrained("xlm-roberta-base", add_prefix_space=True)
 tokenized_datasets = dataset.map(tokenize_and_align_labels, batched=True, batch_size=config.batchsize) # this is super cool
 supertag_vocab.save_if_fresh()
 
+# create batched Pytorch dataset
 tokenized_datasets.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask'])
 train_dataloader = torch.utils.data.DataLoader(tokenized_datasets, batch_size=config.batchsize) # https://huggingface.co/docs/datasets/v1.17.0/use_dataset.html
 
-for batch in train_dataloader:
-    print(batch)
-    sys.exit(0)
+# set up training
+model = TaggingModel(len(supertag_vocab), roberta_id="xlm-roberta-base").to(device)
+loss = CrossEntropyLoss(ignore_index=IGNORE_INDEX, reduce=True)
+optimizer = Adam(model.parameters(), lr=config.learning_rate)
+
+wandb.init(project="roberta-tagging",
+           config={"learning_rate": config.learning_rate,
+                   "batch_size": config.batchsize,
+                   "epochs": config.epochs,
+                   "optimizer": "Adam",
+                   # "architecture": "xlm-roberta+linear",
+                   # "dataset": UD_DATASET
+                   }
+)
 
 
+for epoch in range(config.epochs):
+    total_epoch_loss = 0.0
+    model.train()
 
+    for batch in train_dataloader:
+        input_batch = batch["input_ids"].to(device)
+        attention_mask_batch = batch["attention_mask"].to(device)
+
+        logits = model(input_batch, attention_mask_batch) # (bs, seqlen, #tags)
+
+        logits_nbyc = logits.view(-1, len(supertag_vocab)) # (bs * seqlen, #tags)
+        labels_nbyc = batch["supertag_ids"].to(device).view(-1) # (bs * seqlen,)
+        batch_loss = loss(logits_nbyc, labels_nbyc)
+
+        wandb.log({"batch_loss": batch_loss})
+
+        optimizer.zero_grad()
+        batch_loss.backward()
+        optimizer.step()
+
+wandb.finish()
 
 
 #
