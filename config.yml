@@ -1,5 +1,5 @@
 
-batchsize: 2
+batchsize: 8
 learning_rate: 0.003
 epochs: 20
 

@@ -77,7 +77,7 @@ train_dataloader = torch.utils.data.DataLoader(tokenized_datasets, batch_size=co
 
 # set up training
 model = TaggingModel(len(supertag_vocab), roberta_id="xlm-roberta-base").to(device)
-loss = CrossEntropyLoss(ignore_index=IGNORE_INDEX, reduce=True)
+loss = CrossEntropyLoss(ignore_index=IGNORE_INDEX, reduction='mean')
 optimizer = Adam(model.parameters(), lr=config.learning_rate)
 
 wandb.init(project="roberta-tagging",
