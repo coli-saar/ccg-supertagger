@@ -27,6 +27,7 @@ args = parser.parse_args()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+K = args.num_supertags
 config = Config.load(args.config)
 IGNORE_INDEX=-100
 device = device_selector.choose_device()
@@ -47,11 +48,13 @@ model.load_state_dict(torch.load(config.model_filename))
 model.eval()
 
 # set up dataloader
-tokenized_dataset.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask'])
+tokenized_dataset.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask', 'tokens_representing_words'])
 test_dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=config.batchsize) # https://huggingface.co/docs/datasets/v1.17.0/use_dataset.html
 
+# print(dataset["words"][0])
+# sys.exit(0)
 
-
+all_words = dataset["words"] # [sequence_ix, word_ix]
 
 supertags = []
 skipped_supertags = set(".,;:")
@@ -61,28 +64,52 @@ with torch.no_grad():
     total_correct = 0
     total_counted = 0
     total_tokens = 0
+    batch_start_ix = 0
 
     for batch in tqdm(test_dataloader, desc="Supertagging"):
         input_batch = batch["input_ids"].to(device)
         attention_mask_batch = batch["attention_mask"].to(device) # (bs, seqlen)
+        t2w = batch["tokens_representing_words"] # (bs, word-seqlen)
         batchsize = input_batch.shape[0]
         logits = model(input_batch, attention_mask_batch)  # (bs, seqlen, #tags)
 
         # predicted = torch.argmax(logits, dim=2) # (bs, seqlen)
         seqlen = logits.shape[1]
-        best = torch.topk(logits, args.num_supertags, dim=2)  # (values: (bs, seqlen, k), indices: (bs, seqlen, k))
+        best = torch.topk(logits, args.num_supertags, dim=2)  # (values: (bs, tok-seqlen, k), indices: (bs, tok-seqlen, k))
         assert best.values.shape == (batchsize, seqlen, args.num_supertags)
+
+        # batch["tokens_representing_words"]: (bs, word-seqlen) (give or take one)
+        word_seqlen = batch["tokens_representing_words"].shape[1]
 
         for batch_ix in range(batchsize):
             supertags_here = []
             supertags.append(supertags_here)
 
-            for token_ix in range(seqlen):
-                # TODO get word
-                # TODO - can we use logits or do we have to normalize?
-                best_supertags = [{"score": best.values[batch_ix, token_ix, i].item(), "tag": supertag_vocab.itos(best.indices[batch_ix, token_ix, i].item())} for i in range(args.num_supertags)]
-                supertags_here.append({"word": "?", "supertags": best_supertags})
+            values_by_word = best.values[batch_ix, t2w[batch_ix], :]  # (word-seqlen, K)
+            tag_indices_by_word = best.indices[batch_ix, t2w[batch_ix], :]  # (word-seqlen, K)
+            assert values_by_word.shape == (word_seqlen, K)
 
+            for word_ix in range(word_seqlen):
+                if t2w[batch_ix, word_ix] >= 0:
+                    # print(f"\nsequence ix {batch_start_ix+batch_ix}")
+                    # print(f"sequence {all_words[batch_start_ix+batch_ix]}")
+                    # print(f"len = {len(all_words[batch_start_ix+batch_ix])}")
+                    # print(f"word_ix = {word_ix}")
+
+                    word = all_words[batch_start_ix + batch_ix][word_ix]
+                    best_supertags = [{"score": values_by_word[word_ix,i].item(), "tag": supertag_vocab.itos(tag_indices_by_word[word_ix, i].item())} for i in range(args.num_supertags)]
+                    supertags_here.append({"word": word, "supertags": best_supertags})
+
+            # values_here = best.values[batch_ix, token_ix, ]
+
+            # for token_ix in range(seqlen):
+            #     # TODO get word
+            #     # TODO - can we use logits or do we have to normalize?
+            #     best_supertags = [{"score": best.values[batch_ix, token_ix, i].item(), "tag": supertag_vocab.itos(best.indices[batch_ix, token_ix, i].item())} for i in range(args.num_supertags)]
+            #     supertags_here.append({"word": "?", "supertags": best_supertags})
+            #
+
+        batch_start_ix += batchsize
 
         predicted = torch.argmax(logits, dim=2).view(-1)  # (bs * seqlen)
         gold = batch["supertag_ids"].to(device).view(-1)  # (bs * seqlen)
@@ -92,8 +119,8 @@ with torch.no_grad():
         total_counted += int(counted)
         total_tokens += int(predicted.shape[0])
 
-        if total_tokens > 100:
-            break
+        # if total_tokens > 100:
+        #     break
 
 
     acc = float(total_correct) / total_counted

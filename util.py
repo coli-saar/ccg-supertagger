@@ -140,11 +140,19 @@ def tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX):
         # prettyprint(examples["words"], examples["supertags"], tokenized_inputs)
 
         supertag_ids_whole_batch = []
+        tokens_representing_words = []
+        maxlen_t2w = 0  # max length of a token_to_word_here list
+
         for batch_ix, supertags_this_sentence in enumerate(examples["supertags"]):
             word_ids = tokenized_inputs.word_ids(batch_index=batch_ix)
             previous_word_idx = None
             supertag_ids : list[int] = []
-            for word_idx in word_ids:
+
+            # list of token positions that map to words (first token of each word)
+            # token 0 -> word 0 (BOS)
+            tokens_representing_word_here: list[int] = []
+
+            for sentence_position, word_idx in enumerate(word_ids):
                 # Special tokens have a word id that is None. We set the label to -100 so they are automatically
                 # ignored in the loss function.
                 if word_idx is None:
@@ -153,6 +161,7 @@ def tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX):
                 # We set the label for the first token of each word.
                 elif word_idx != previous_word_idx:
                     supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]))
+                    tokens_representing_word_here.append(sentence_position)  # first word is index 1; index 0 is BOS
 
                 # For the other tokens in a word, we set the label to either the current label or -100, depending on
                 # the label_all_tokens flag.
@@ -161,9 +170,21 @@ def tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX):
 
                 previous_word_idx = word_idx
 
+            tokens_representing_words.append(tokens_representing_word_here)
+            if len(tokens_representing_word_here) > maxlen_t2w:
+                maxlen_t2w = len(tokens_representing_word_here)
+
             supertag_ids_whole_batch.append(supertag_ids)
 
+        # pad t2w lists to same length
+        for t2w in tokens_representing_words:
+            t2w += [-1] * (maxlen_t2w - len(t2w))
+
         tokenized_inputs["supertag_ids"] = supertag_ids_whole_batch
+
+        # for each sequence, remember which token positions were the first token of a word
+        tokenized_inputs["tokens_representing_words"] = tokens_representing_words
+
         return tokenized_inputs
 
     return mapfn
