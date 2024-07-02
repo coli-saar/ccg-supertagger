@@ -1,1 +1,6 @@
 pydantic
+tqdm
+wandb
+datasets
+transformers
+
