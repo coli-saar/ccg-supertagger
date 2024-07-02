@@ -17,4 +17,3 @@ dev_data:
 
 test_data:
   - '../ccgbank_1_1/data/AUTO/23/*.auto'
-!
