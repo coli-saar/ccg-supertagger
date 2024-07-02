@@ -16,13 +16,25 @@ class Config(BaseModel):
     # # betas: List[float] = [0.9, 0.999]
     # limit_train: int = 1000000000
     # limit_dev: int = 1000000000
-    training_data: str
+    training_data: list[str]
+    dev_data: list[str]
+    test_data: list[str]
     supertag_vocabulary_filename: str = "supertag_vocabulary.txt"
 
-    def get_training_filenames(self) -> Iterable[str]:
-        names = list(glob(self.training_data))
-        names.sort()
-        return names
+    def expand_filenames(self, dataset: list[str]) -> list[str]:
+        """
+        Call as e.g. expand_filenames(config.training_data).
+
+        :param dataset:
+        :return:
+        """
+        ret = []
+        for globstr in dataset:
+            names = glob(globstr)
+            ret.extend(names)
+
+        ret.sort()
+        return ret
 
     @staticmethod
     def load(filename) -> "Config":

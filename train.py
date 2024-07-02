@@ -2,7 +2,7 @@
 import sys
 import torch
 import wandb
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
 from transformers import XLMRobertaTokenizerFast
@@ -11,7 +11,7 @@ import device_selector
 from config import Config
 from model import TaggingModel
 from supertag_reader import read_corpus
-from util import Vocabulary
+from util import Vocabulary, create_dataset
 
 # suppress tokenizer parallelization
 import os
@@ -21,10 +21,7 @@ config = Config.load("config.yml")
 IGNORE_INDEX=-100
 device = device_selector.choose_device()
 
-corpus = read_corpus(config.get_training_filenames())
-data_dict = corpus.as_dict()
-dataset = Dataset.from_dict(data_dict)
-
+dataset = create_dataset(config)
 supertag_vocab = Vocabulary.load_or_initialize(config.supertag_vocabulary_filename)
 
 
@@ -65,15 +62,23 @@ def tokenize_and_align_labels(examples, label_all_tokens=False, skip_index=IGNOR
     tokenized_inputs["supertag_ids"] = supertag_ids_whole_batch
     return tokenized_inputs
 
+# print(dataset["train"])
+
 
 # tokenize and vocabularize the dataset
 tokenizer = XLMRobertaTokenizerFast.from_pretrained("xlm-roberta-base", add_prefix_space=True)
-tokenized_datasets = dataset.map(tokenize_and_align_labels, batched=True, batch_size=config.batchsize) # this is super cool
+tokenized_datasets: DatasetDict = dataset.map(tokenize_and_align_labels, batched=True, batch_size=config.batchsize) # this is super cool
 supertag_vocab.save_if_fresh()
 
-# create batched Pytorch dataset
-tokenized_datasets.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask'])
-train_dataloader = torch.utils.data.DataLoader(tokenized_datasets, batch_size=config.batchsize) # https://huggingface.co/docs/datasets/v1.17.0/use_dataset.html
+# create batched Pytorch datasets
+train_dataset = tokenized_datasets["train"]
+train_dataset.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask'])
+train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=config.batchsize) # https://huggingface.co/docs/datasets/v1.17.0/use_dataset.html
+
+dev_dataset = tokenized_datasets["dev"]
+dev_dataset.set_format(type='torch', columns=['input_ids', 'supertag_ids', 'attention_mask'])
+dev_dataloader = torch.utils.data.DataLoader(dev_dataset, batch_size=config.batchsize) # https://huggingface.co/docs/datasets/v1.17.0/use_dataset.html
+
 
 # set up training
 model = TaggingModel(len(supertag_vocab), roberta_id="xlm-roberta-base").to(device)

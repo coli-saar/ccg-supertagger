@@ -4,6 +4,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Iterable
 
+from tqdm import tqdm
+
 # from attr import dataclass, field
 
 regex = r"<L\s*(\S+)\s*\S+\s*\S+\s+(\S+)[^>]*>"
@@ -40,8 +42,8 @@ def read_corpus(corpus_files:Iterable[str]) -> Corpus:
     """
     ret = Corpus()
 
-    for filename in corpus_files:
-        print(f"Processing {filename} ...")
+    for filename in tqdm(corpus_files):
+        # print(f"Processing {filename} ...")
         with open(filename, "r") as f:
             for line in f:
                 sentence_here = Sentence()

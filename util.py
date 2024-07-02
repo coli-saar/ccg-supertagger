@@ -1,6 +1,12 @@
+import sys
 from typing import Optional
 
+import torch
+from datasets import Dataset, NamedSplit, DatasetDict
 from transformers import BatchEncoding
+
+from config import Config
+from supertag_reader import read_corpus
 
 
 class Vocabulary:
@@ -102,3 +108,27 @@ def prettyprint(words, tags, tokenized_inputs:BatchEncoding) -> None:
             print()
 
         print("---")
+
+
+def accuracy(predicted, gold, ignore_index) -> (int, int):
+    counted = torch.sum(gold != ignore_index) # count entries in gold that are not IGNORE_INDEX
+    correct = torch.sum(gold == predicted)    # count entries that are the same
+    return int(correct), int(counted)
+
+def create_dataset(config:Config) -> DatasetDict:
+    # print(config.expand_filenames(config.training_data))
+    # print(config.expand_filenames(config.dev_data))
+    # print(config.expand_filenames(config.test_data))
+    # sys.exit(0)
+
+
+    data_dict = {
+        "train": read_corpus(config.expand_filenames(config.training_data)).as_dict(),
+        "dev": read_corpus(config.expand_filenames(config.dev_data)).as_dict(),
+        "test": read_corpus(config.expand_filenames(config.test_data)).as_dict()
+    }
+
+    ds_train = Dataset.from_dict(data_dict["train"], split=NamedSplit("train"))
+    ds_dev = Dataset.from_dict(data_dict["dev"], split=NamedSplit("dev"))
+
+    return DatasetDict({"train": ds_train, "dev": ds_dev})
