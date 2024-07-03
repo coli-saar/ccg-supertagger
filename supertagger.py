@@ -24,6 +24,7 @@ parser.add_argument('--output', '-O', required=True, help="Filename of the JSON 
 parser.add_argument('--num-supertags', '-n', type=int, default=5, help="Number of supertags that will be predicted for each word.")
 parser.add_argument("--config", "-c", type=str, default="config.yml", help="Name of the configuration file.")
 parser.add_argument("--model", "-m", type=str, default=None, help="Name of Pytorch model file. If no option is specified, use model name from the config file.")
+parser.add_argument("--score-model", "-s", choices=["logits", "logsoftmax"], default="logits", help="Function to compute the scores from the logits.")
 args = parser.parse_args()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -69,6 +70,11 @@ all_words = dataset["words"] # [sequence_ix, word_ix]
 supertags = []
 skipped_supertags = set(".,;:")
 
+if args.score_model == "logits":
+    score_fn = lambda x: x # return raw logits
+elif args.score_model == "logsoftmax":
+    score_fn = lambda logits: torch.nn.functional.log_softmax(logits, dim=2)
+
 # run supertagger
 with torch.no_grad():
     total_correct = 0
@@ -85,7 +91,10 @@ with torch.no_grad():
 
         # predicted = torch.argmax(logits, dim=2) # (bs, seqlen)
         seqlen = logits.shape[1]
-        best = torch.topk(logits, args.num_supertags, dim=2)  # (values: (bs, tok-seqlen, k), indices: (bs, tok-seqlen, k))
+
+        # get highest-scoring supertags
+        scores = score_fn(logits) # (bs, seqlen, #tags)
+        best = torch.topk(scores, args.num_supertags, dim=2)  # (values: (bs, tok-seqlen, k), indices: (bs, tok-seqlen, k))
         assert best.values.shape == (batchsize, seqlen, args.num_supertags)
 
         # batch["tokens_representing_words"]: (bs, word-seqlen) (give or take one)
@@ -108,7 +117,10 @@ with torch.no_grad():
 
                     word = all_words[batch_start_ix + batch_ix][word_ix]
                     best_supertags = [{"score": values_by_word[word_ix,i].item(), "tag": supertag_vocab.itos(tag_indices_by_word[word_ix, i].item())} for i in range(args.num_supertags)]
-                    supertags_here.append({"word": word, "supertags": best_supertags})
+                    best_supertags = [elem for elem in best_supertags if not elem["tag"] in skipped_supertags]
+
+                    if len(best_supertags) > 0:
+                        supertags_here.append({"word": word, "supertags": best_supertags})
 
             # values_here = best.values[batch_ix, token_ix, ]
 
