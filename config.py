@@ -20,7 +20,7 @@ class Config(BaseModel):
     dev_data: list[str]
     test_data: list[str]
     supertag_vocabulary_filename: str = "supertag_vocabulary.txt"
-    model_filename: Optional[str]
+    model_filename: Optional[str] = None
 
     def expand_filenames(self, dataset: list[str]) -> list[str]:
         """
