@@ -20,6 +20,9 @@ class Vocabulary:
         self._itos = []
 
     def stoi(self, s:str) -> int:
+        if s.endswith("/"):
+            raise Exception("Found a trailing slash")
+
         if s in self._stoi:
             return self._stoi[s]
         else:
@@ -128,6 +131,14 @@ def create_dataset(config:Config) -> DatasetDict:
     return DatasetDict({"train": ds_train, "dev": ds_dev})
 
 
+# Clean up the lexical category: work around
+# "((S[b]\NP)/NP)/", which I think is a typo.
+
+def cleanup_supertag(supertag):
+    if supertag.endswith("/"):
+        supertag = supertag[1:-2]
+    return supertag
+
 def tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX):
     def mapfn(examples, label_all_tokens=False, skip_index=IGNORE_INDEX):
         # adapted from https://colab.research.google.com/github/huggingface/notebooks/blob/main/examples/token_classification.ipynb#scrollTo=vc0BSBLIIrJQ
@@ -160,13 +171,13 @@ def tokenize_and_align_labels(tokenizer, supertag_vocab, IGNORE_INDEX):
 
                 # We set the label for the first token of each word.
                 elif word_idx != previous_word_idx:
-                    supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]))
+                    supertag_ids.append(supertag_vocab.stoi(cleanup_supertag( supertags_this_sentence[word_idx])))
                     tokens_representing_word_here.append(sentence_position)  # first word is index 1; index 0 is BOS
 
                 # For the other tokens in a word, we set the label to either the current label or -100, depending on
                 # the label_all_tokens flag.
                 else:
-                    supertag_ids.append(supertag_vocab.stoi(supertags_this_sentence[word_idx]) if label_all_tokens else skip_index)
+                    supertag_ids.append(supertag_vocab.stoi(cleanup_supertag(supertags_this_sentence[word_idx])) if label_all_tokens else skip_index)
 
                 previous_word_idx = word_idx
 
